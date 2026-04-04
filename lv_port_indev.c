@@ -51,6 +51,9 @@ void lv_port_indev_init(void)
     static lv_indev_drv_t indev_drv;
     static lv_indev_drv_t indev_drv2;
 
+    sceCtrlSetSamplingCycle(0);
+    sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
+
     /*------------------
      * Mouse
      * -----------------*/
@@ -122,11 +125,8 @@ static void mouse_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data)
 static bool mouse_is_pressed(void)
 {
     /*Your code comes here*/
-
     SceCtrlData pad;
-    sceCtrlSetSamplingCycle(0);
-    sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
-    sceCtrlReadBufferPositive(&pad, 1);
+    sceCtrlPeekBufferPositive(&pad, 1);
 
     if (pad.Buttons & PSP_CTRL_CROSS)
     {
@@ -164,9 +164,7 @@ static void mouse_get_xy(lv_coord_t * x, lv_coord_t * y)
 {
     /*Your code comes here*/
     SceCtrlData pad;
-    sceCtrlSetSamplingCycle(0);
-    sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
-    sceCtrlReadBufferPositive(&pad, 1);
+    sceCtrlPeekBufferPositive(&pad, 1);
 
     mouse_x += mouse_get_delta(pad.Lx);
     if (mouse_x < 0)
@@ -274,9 +272,7 @@ static uint32_t keypad_get_key(void)
 {
     /*Your code comes here*/
     SceCtrlData pad;
-    sceCtrlSetSamplingCycle(0);
-    sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
-    sceCtrlReadBufferPositive(&pad, 1);
+    sceCtrlPeekBufferPositive(&pad, 1);
 
     return pad.Buttons;
 }
