@@ -18,15 +18,17 @@
 #include <pspkerneltypes.h>
 #include <pspdmac.h>
 #include <psputils.h>
+#include <string.h>
 
 /*********************
  *      DEFINES
  *********************/
 #define MY_DISP_HOR_RES    480
 #define MY_DISP_VER_RES    272
-#define BYTE_PER_PIXEL (LV_COLOR_FORMAT_GET_SIZE(LV_COLOR_FORMAT_ARGB8888))
+#define BYTE_PER_PIXEL (LV_COLOR_DEPTH / 8)
 #define PSP_BUF_WIDTH 512
-#define FBSIZE (PSP_BUF_WIDTH * MY_DISP_VER_RES * BYTE_PER_PIXEL)
+#define FB_NUM_PIXEL (PSP_BUF_WIDTH * MY_DISP_VER_RES)
+#define FBSIZE (FB_NUM_PIXEL * BYTE_PER_PIXEL)
 
 /**********************
  *      TYPEDEFS
@@ -45,6 +47,7 @@ static void disp_flush(lv_display_t * disp, const lv_area_t * area, uint8_t * px
 static char *disp_buf_0;
 static char *disp_buf_1;
 static char draw_buf[FBSIZE];
+static char draw_buf_br_flip[FBSIZE];
 
 /**********************
  *      MACROS
@@ -119,6 +122,37 @@ static void dcache_writeback(uint32_t addr, int size){
     sceKernelDcacheWritebackRange((void *)addr, size);
 }
 
+// on no, this is gonna be very slow
+static void swap_br_8888(char *dst, const char *src){
+    for(int line = 0;line < MY_DISP_VER_RES;line++){
+        for(int pixel = 0;pixel < MY_DISP_HOR_RES;pixel++){
+            char *dst_pixel = &dst[(line * PSP_BUF_WIDTH + pixel) * 4];
+            char *src_pixel = &src[(line * PSP_BUF_WIDTH + pixel) * 4];
+            dst_pixel[3] = src_pixel[3];
+            dst_pixel[2] = src_pixel[0];
+            dst_pixel[1] = src_pixel[1];
+            dst_pixel[0] = src_pixel[2];
+        }
+    }
+}
+
+static void swap_br_565(char *dst, const char *src){
+    for(int line = 0;line < MY_DISP_VER_RES;line++){
+        for(int pixel = 0;pixel < MY_DISP_HOR_RES;pixel++){
+            uint8_t *dst_pixel = (uint8_t *)&dst[(line * PSP_BUF_WIDTH + pixel) * 2];
+            uint8_t *src_pixel = (uint8_t *)&src[(line * PSP_BUF_WIDTH + pixel) * 2];
+
+            uint8_t r = src_pixel[1] >> 3;
+            uint8_t g_0 = src_pixel[1] & 0b111;
+            uint8_t g_1 = src_pixel[0] & 0b11100000;
+            uint8_t b = src_pixel[0] & 0b11111;
+
+            dst_pixel[1] = (b << 3) | g_0;
+            dst_pixel[0] = (r) | g_1;
+        }
+    }
+}
+
 /*Flush the content of the internal buffer the specific area on the display.
  *`px_map` contains the rendered image as raw pixel map and it should be copied to `area` on the display.
  *You can use DMA or any hardware acceleration to do this operation in the background but
@@ -129,9 +163,17 @@ static void disp_flush(lv_display_t * disp_drv, const lv_area_t * area, uint8_t 
     char *fb = buffer_toggle ? disp_buf_1 : disp_buf_0;
     buffer_toggle = !buffer_toggle;
 
-    dcache_writeback((uint32_t)draw_buf, sizeof(draw_buf));
-    sceDmacMemcpy(fb, draw_buf, sizeof(draw_buf));
-    sceDisplaySetFrameBuf(fb, PSP_BUF_WIDTH, PSP_DISPLAY_PIXEL_FORMAT_8888, PSP_DISPLAY_SETBUF_NEXTVSYNC);
+    #if LV_COLOR_DEPTH == 16
+    swap_br_565(draw_buf_br_flip, draw_buf);
+    #endif
+
+    #if LV_COLOR_DEPTH == 32
+    swap_br_8888(draw_buf_br_flip, draw_buf);
+    #endif
+
+    dcache_writeback((uint32_t)draw_buf_br_flip, sizeof(draw_buf_br_flip));
+    sceDmacMemcpy(fb, draw_buf_br_flip, sizeof(draw_buf_br_flip));
+    sceDisplaySetFrameBuf(fb, PSP_BUF_WIDTH, PSP_DISPLAY_PIXEL_FORMAT_565, PSP_DISPLAY_SETBUF_NEXTVSYNC);
 
     sceDisplayWaitVblankCB();
 

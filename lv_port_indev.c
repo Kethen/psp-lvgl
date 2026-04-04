@@ -17,7 +17,7 @@
  *      DEFINES
  *********************/
 #define MOUSE_DEADZONE 10
-#define MOUSE_MAX_SPEED 10
+#define MOUSE_MAX_SPEED 20
 #define MOUSE_SPEED_MODIFIER (127 / MOUSE_MAX_SPEED)
 
 /**********************
