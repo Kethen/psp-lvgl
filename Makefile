@@ -1,10 +1,8 @@
-LVGL_DIR = ..
-LVGL_DIR_NAME ?=lvgl
-include $(LVGL_DIR)/$(LVGL_DIR_NAME)/lvgl.mk
+include lvgl/lvgl.mk
 COBJS = $(CSRCS:.c=.o)
 
 TARGET = demo
-OBJS = $(COBJS)  ../lv_port_disp.o  ../lv_port_indev.o ../mouse_cursor_icon.o main.o
+OBJS = $(COBJS) lv_port_disp.o lv_port_indev.o mouse_cursor_icon.o sample/main.o
 
 INCDIR = -I$(LVGL_DIR)/$(LVGL_DIR_NAME)
 CFLAGS = -Wall -O2
