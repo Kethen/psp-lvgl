@@ -13,7 +13,7 @@ ASFLAGS = $(CFLAGS)
 
 LIBDIR = 
 LDFLAGS = 
-LIBS= -lpspgu -lpspvram
+LIBS= -lpspgu -lpspvram -lpspdmac
 
 BUILD_PRX=1
 EXTRA_TARGETS = EBOOT.PBP
