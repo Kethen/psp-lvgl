@@ -9,6 +9,21 @@
 PSP_MODULE_INFO("LVGL Sample", 0, 1, 1);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 
+#include <stdio.h>
+#include <stdarg.h>
+
+#include <pspstdio.h>
+#include <pspiofilemgr.h>
+
+void printk(const char *fmt, ...){
+	char buf[256];
+	va_list args;
+	va_start(args, fmt);
+	int len = vsnprintf(buf, sizeof(buf), fmt, args);
+	sceIoWrite(sceKernelStdout(), buf, len);
+}
+
+
 int main(int argc, char** argv)
 {
     lv_init();
@@ -20,7 +35,8 @@ int main(int argc, char** argv)
     while (true) {
         uint64_t begin = sceKernelGetSystemTimeWide();
         lv_timer_handler();
-        uint32_t timespent = sceKernelGetSystemTimeWide() - begin;
+        int timespent = sceKernelGetSystemTimeWide() - begin;\
+        //printk("%s: lv_timer_handler spent %d us\n", __func__, timespent);
         if (timespent < 5000){
             // we yield in display driver anyway
             sceKernelDelayThread(5000 - timespent);

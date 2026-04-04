@@ -10,6 +10,7 @@
 #include <pspkerneltypes.h>
 #include <pspdmac.h>
 #include <psputils.h>
+#include <pspkernel.h>
 
 /*********************
  *      DEFINES
@@ -61,7 +62,7 @@ void lv_port_disp_init(void)
     disp_init();
 
     static lv_disp_draw_buf_t draw_buf_dsc_3;
-    lv_disp_draw_buf_init(&draw_buf_dsc_3, draw_buf, NULL,
+    lv_disp_draw_buf_init(&draw_buf_dsc_3, disp_buf_0, disp_buf_1,
                           PSP_BUF_WIDTH * PSP_VERT_RES);   /*Initialize the display buffer*/
 
     /*-----------------------------------
@@ -82,7 +83,7 @@ void lv_port_disp_init(void)
 
     /*Set a display buffer*/
     disp_drv.draw_buf = &draw_buf_dsc_3;
-    disp_drv.direct_mode = 1;
+    disp_drv.full_refresh = 1;
 
     /* Fill a memory array with a color if you have GPU.
      * Note that, in lv_conf.h you can enable GPUs that has built-in support in LVGL.
@@ -119,20 +120,15 @@ static void dcache_writeback(uint32_t addr, int size){
     sceKernelDcacheWritebackRange((void *)addr, size);
 }
 
+void printk(const char *fmt, ...);
 
 /*Flush the content of the internal buffer the specific area on the display
  *You can use DMA or any hardware acceleration to do this operation in the background but
  *'lv_disp_flush_ready()' has to be called when finished.*/
 static void disp_flush(lv_disp_drv_t * disp_drv, const lv_area_t * area, lv_color_t * color_p)
 {
-    static int buffer_toggle = 0;
-    char *fb = buffer_toggle ? disp_buf_1 : disp_buf_0;
-    buffer_toggle = !buffer_toggle;
-
-    memcpy(fb, draw_buf, sizeof(draw_buf));
-    dcache_writeback((uint32_t)fb, sizeof(draw_buf));
-    sceDisplaySetFrameBuf(fb, PSP_BUF_WIDTH, PSP_DISPLAY_PIXEL_FORMAT_8888, PSP_DISPLAY_SETBUF_NEXTVSYNC);
-
+    dcache_writeback((uint32_t)color_p, FBSIZE);
+    sceDisplaySetFrameBuf(color_p, PSP_BUF_WIDTH, PSP_DISPLAY_PIXEL_FORMAT_8888, PSP_DISPLAY_SETBUF_NEXTVSYNC);
     sceDisplayWaitVblankCB();
 
     /*IMPORTANT!!!
