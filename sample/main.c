@@ -3,14 +3,30 @@
 #include "../lvgl/demos/keypad_encoder/lv_demo_keypad_encoder.h"
 #include "../lv_port_disp.h"
 #include "../lv_port_indev.h"
+#include "../printk.h"
 
 #include <pspkernel.h>
+
+#define PROFILE LV_USE_SYSMON
 
 PSP_MODULE_INFO("LVGL Sample", 0, 1, 1);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 
 static uint32_t tick_cb(){
-	return sceKernelGetSystemTimeWide() / 1000;
+    return sceKernelGetSystemTimeWide() / 1000;
+}
+
+static uint32_t pump(){
+    uint64_t begin = sceKernelGetSystemTimeWide();
+    lv_timer_handler();
+    uint32_t timespent = sceKernelGetSystemTimeWide() - begin;
+    #if PROFILE
+    printk("%s: lv_timer_handler took %u us\n", __func__, timespent);
+    #endif
+    if (timespent < 5000){
+        // we yield in display driver anyway
+        sceKernelDelayThread(5000 - timespent);
+    }
 }
 
 int main(int argc, char** argv)
@@ -18,6 +34,7 @@ int main(int argc, char** argv)
     lv_init();
     lv_port_disp_init();
     lv_port_indev_init();
+    lv_tick_set_cb(tick_cb);
 
     static lv_style_t container_style;
     lv_style_init(&container_style);
@@ -33,18 +50,10 @@ int main(int argc, char** argv)
         .parent = container,
     };
 
-    //lv_example_get_started_3();
-    lv_demo_music_with_args(&demo_arg);
+    //lv_demo_music_with_args(&demo_arg);
+    lv_demo_keypad_encoder();
 
-    //lv_demo_keypad_encoder();
-    lv_tick_set_cb(tick_cb);
     while (true) {
-        uint64_t begin = sceKernelGetSystemTimeWide();
-        lv_timer_handler();
-        uint32_t timespent = sceKernelGetSystemTimeWide() - begin;
-        if (timespent < 5000){
-            // we yield in display driver anyway
-            sceKernelDelayThread(5000 - timespent);
-        }
+        pump();
     }
 }

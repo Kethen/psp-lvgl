@@ -32,7 +32,7 @@
 #define PSP_BUF_WIDTH 512
 #define FB_NUM_PIXEL (PSP_BUF_WIDTH * MY_DISP_VER_RES)
 #define FBSIZE (FB_NUM_PIXEL * BYTE_PER_PIXEL)
-#define PROFILE 0
+#define PROFILE LV_USE_SYSMON
 
 /**********************
  *      TYPEDEFS
