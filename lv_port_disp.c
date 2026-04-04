@@ -18,7 +18,10 @@
 #include <pspkerneltypes.h>
 #include <pspdmac.h>
 #include <psputils.h>
+#include <pspkernel.h>
 #include <string.h>
+#include "printk.h"
+
 
 /*********************
  *      DEFINES
@@ -29,6 +32,7 @@
 #define PSP_BUF_WIDTH 512
 #define FB_NUM_PIXEL (PSP_BUF_WIDTH * MY_DISP_VER_RES)
 #define FBSIZE (FB_NUM_PIXEL * BYTE_PER_PIXEL)
+#define PROFILE 0
 
 /**********************
  *      TYPEDEFS
@@ -124,6 +128,10 @@ static void dcache_writeback(uint32_t addr, int size){
 
 // on no, this is gonna be very slow
 static void swap_br_8888(char *dst, const char *src){
+    #if PROFILE
+    uint64_t begin = sceKernelGetSystemTimeWide();
+    #endif
+
     for(int line = 0;line < MY_DISP_VER_RES;line++){
         for(int pixel = 0;pixel < MY_DISP_HOR_RES;pixel++){
             char *dst_pixel = &dst[(line * PSP_BUF_WIDTH + pixel) * 4];
@@ -134,9 +142,18 @@ static void swap_br_8888(char *dst, const char *src){
             dst_pixel[0] = src_pixel[2];
         }
     }
+
+    #if PROFILE
+    uint32_t timespent = sceKernelGetSystemTimeWide() - begin;
+    printk("%s: took %u us\n", __func__, timespent);
+    #endif
 }
 
 static void swap_br_565(char *dst, const char *src){
+    #if PROFILE
+    uint64_t begin = sceKernelGetSystemTimeWide();
+    #endif
+
     for(int line = 0;line < MY_DISP_VER_RES;line++){
         for(int pixel = 0;pixel < MY_DISP_HOR_RES;pixel++){
             uint8_t *dst_pixel = (uint8_t *)&dst[(line * PSP_BUF_WIDTH + pixel) * 2];
@@ -151,6 +168,26 @@ static void swap_br_565(char *dst, const char *src){
             dst_pixel[0] = (r) | g_1;
         }
     }
+
+    #if PROFILE
+    uint32_t timespent = sceKernelGetSystemTimeWide() - begin;
+    printk("%s: took %u us\n", __func__, timespent);
+    #endif
+}
+
+static void dma_copy_and_set_framebuf(char *dst, const char *src, int size, int psp_pixel_format){
+    #if PROFILE
+    uint64_t begin = sceKernelGetSystemTimeWide();
+    #endif
+
+    dcache_writeback((uint32_t)src, size);
+    sceDmacMemcpy(dst, src, size);
+    sceDisplaySetFrameBuf(dst, PSP_BUF_WIDTH, psp_pixel_format, PSP_DISPLAY_SETBUF_NEXTVSYNC);
+
+    #if PROFILE
+    uint32_t timespent = sceKernelGetSystemTimeWide() - begin;
+    printk("%s: took %u us\n", __func__, timespent);
+    #endif
 }
 
 /*Flush the content of the internal buffer the specific area on the display.
@@ -164,16 +201,16 @@ static void disp_flush(lv_display_t * disp_drv, const lv_area_t * area, uint8_t 
     buffer_toggle = !buffer_toggle;
 
     #if LV_COLOR_DEPTH == 16
+    int psp_pixel_format = PSP_DISPLAY_PIXEL_FORMAT_565;
     swap_br_565(draw_buf_br_flip, draw_buf);
     #endif
 
     #if LV_COLOR_DEPTH == 32
+    int psp_pixel_format = PSP_DISPLAY_PIXEL_FORMAT_8888;
     swap_br_8888(draw_buf_br_flip, draw_buf);
     #endif
 
-    dcache_writeback((uint32_t)draw_buf_br_flip, sizeof(draw_buf_br_flip));
-    sceDmacMemcpy(fb, draw_buf_br_flip, sizeof(draw_buf_br_flip));
-    sceDisplaySetFrameBuf(fb, PSP_BUF_WIDTH, PSP_DISPLAY_PIXEL_FORMAT_565, PSP_DISPLAY_SETBUF_NEXTVSYNC);
+    dma_copy_and_set_framebuf(fb, draw_buf_br_flip, sizeof(draw_buf_br_flip), psp_pixel_format);
 
     sceDisplayWaitVblankCB();
 
