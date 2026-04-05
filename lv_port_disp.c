@@ -1,18 +1,38 @@
+/**
+ * @file lv_port_disp_template.c
+ *
+ */
+
+/*Copy this file as "lv_port_disp.c" and set this value to "1" to enable content*/
+#if 1
+
 /*********************
  *      INCLUDES
  *********************/
 #include "lv_port_disp.h"
-#include "lvgl/lvgl.h"
+#include <stdbool.h>
 #include <pspdisplay.h>
 #include <pspgu.h>
 #include <pspge.h>
 #include <vram.h>
 #include <pspkerneltypes.h>
 #include <pspdmac.h>
+#include <psputils.h>
+#include <pspkernel.h>
+#include <string.h>
+#include "printk.h"
+
 
 /*********************
  *      DEFINES
  *********************/
+#define MY_DISP_HOR_RES    480
+#define MY_DISP_VER_RES    272
+#define BYTE_PER_PIXEL (LV_COLOR_DEPTH / 8)
+#define PSP_BUF_WIDTH 512
+#define FB_NUM_PIXEL (PSP_BUF_WIDTH * MY_DISP_VER_RES)
+#define FBSIZE (FB_NUM_PIXEL * BYTE_PER_PIXEL)
+#define PROFILE LV_USE_SYSMON
 
 /**********************
  *      TYPEDEFS
@@ -23,16 +43,15 @@
  **********************/
 static void disp_init(void);
 
-static void disp_flush(lv_disp_drv_t * disp_drv, const lv_area_t * area, lv_color_t * color_p);
-//static void gpu_fill(lv_disp_drv_t * disp_drv, lv_color_t * dest_buf, lv_coord_t dest_width,
-//        const lv_area_t * fill_area, lv_color_t color);
+static void disp_flush(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map);
 
 /**********************
  *  STATIC VARIABLES
  **********************/
-static unsigned int __attribute__((aligned(16))) DisplayList[262144];
-static void* draw_buf;
-static void* disp_buf;
+static char *disp_buf_0;
+static char *disp_buf_1;
+static char draw_buf[FBSIZE];
+
 /**********************
  *      MACROS
  **********************/
@@ -43,51 +62,23 @@ static void* disp_buf;
 
 void lv_port_disp_init(void)
 {
-    /*-----------------------------
-     * Create buffers for drawing
-     *----------------------------*/
-
-    draw_buf = valloc(PSP_BUF_WIDTH*PSP_VERT_RES*4);
-    disp_buf = valloc(PSP_BUF_WIDTH*PSP_VERT_RES*4);
-
+    // allocate buffers
+    disp_buf_0 = vramalloc(FBSIZE);
+    disp_buf_1 = vramalloc(FBSIZE);
 
     /*-------------------------
      * Initialize your display
      * -----------------------*/
-
     disp_init();
 
-    static lv_disp_draw_buf_t draw_buf_dsc_3;
-    lv_disp_draw_buf_init(&draw_buf_dsc_3, draw_buf, disp_buf,
-                          PSP_BUF_WIDTH * PSP_VERT_RES);   /*Initialize the display buffer*/
+    /*------------------------------------
+     * Create a display and set a flush_cb
+     * -----------------------------------*/
+    lv_display_t * disp = lv_display_create(PSP_BUF_WIDTH, MY_DISP_VER_RES);
+    lv_display_set_flush_cb(disp, disp_flush);
 
-    /*-----------------------------------
-     * Register the display in LVGL
-     *----------------------------------*/
-
-    static lv_disp_drv_t disp_drv;                         /*Descriptor of a display driver*/
-    lv_disp_drv_init(&disp_drv);                    /*Basic initialization*/
-
-    /*Set up the functions to access to your display*/
-
-    /*Set the resolution of the display*/
-    disp_drv.hor_res = PSP_BUF_WIDTH;//PSP_HOR_RES;
-    disp_drv.ver_res = PSP_VERT_RES;
-
-    /*Used to copy the buffer's content to the display*/
-    disp_drv.flush_cb = disp_flush;
-
-    /*Set a display buffer*/
-    disp_drv.draw_buf = &draw_buf_dsc_3;
-    disp_drv.full_refresh = 1;
-
-    /* Fill a memory array with a color if you have GPU.
-     * Note that, in lv_conf.h you can enable GPUs that has built-in support in LVGL.
-     * But if you have a different GPU you can use with this callback.*/
-    //disp_drv.gpu_fill_cb = gpu_fill;
-
-    /*Finally register the driver*/
-    lv_disp_drv_register(&disp_drv);
+    // render to draw buffer in direct mode
+    lv_display_set_buffers(disp, draw_buf, NULL, sizeof(draw_buf), LV_DISPLAY_RENDER_MODE_DIRECT);
 }
 
 /**********************
@@ -97,57 +88,136 @@ void lv_port_disp_init(void)
 /*Initialize your display and the required peripherals.*/
 static void disp_init(void)
 {
-    sceGuInit();
-    sceGuStart(GU_DIRECT, DisplayList);
-    sceGuDrawBuffer(GU_PSM_8888, vrelptr(draw_buf), PSP_BUF_WIDTH);
-    sceGuDispBuffer(PSP_HOR_RES, PSP_VERT_RES, vrelptr(disp_buf), PSP_BUF_WIDTH);
-
-    sceGuOffset(2048 - (PSP_HOR_RES>>1), 2048 - (PSP_VERT_RES>>1));
-    sceGuViewport(2048, 2048, PSP_HOR_RES, PSP_VERT_RES);
-
-    sceGuDisable(GU_DEPTH_TEST);
-
-    // Scissoring 
-    sceGuScissor(0, 0, PSP_HOR_RES, PSP_VERT_RES);
-    sceGuEnable(GU_SCISSOR_TEST);
-
-    sceGuFinish();
-    sceGuSync(0,0);
+    sceDisplaySetMode(PSP_DISPLAY_MODE_LCD, MY_DISP_HOR_RES, MY_DISP_VER_RES);
     sceDisplayWaitVblankStart();
-    sceGuDisplay(GU_TRUE);
 }
 
-/*Flush the content of the internal buffer the specific area on the display
- *You can use DMA or any hardware acceleration to do this operation in the background but
- *'lv_disp_flush_ready()' has to be called when finished.*/
-static void disp_flush(lv_disp_drv_t * disp_drv, const lv_area_t * area, lv_color_t * color_p)
+volatile bool disp_flush_enabled = true;
+
+/* Enable updating the screen (the flushing process) when disp_flush() is called by LVGL
+ */
+void disp_enable_update(void)
 {
+    disp_flush_enabled = true;
+}
+
+/* Disable updating the screen (the flushing process) when disp_flush() is called by LVGL
+ */
+void disp_disable_update(void)
+{
+    disp_flush_enabled = false;
+}
+
+static void dcache_writeback(uint32_t addr, int size){
+    static const int alignment = 64;
+
+    int addr_mod = (addr % alignment);
+    size += addr_mod;
+    addr -= addr_mod;
+
+    int size_mod = size % alignment;
+    if (size_mod != 0){
+        size += (alignment - size_mod);
+    }
+
+    sceKernelDcacheWritebackRange((void *)addr, size);
+}
+
+// on no, this is gonna be very slow
+static void swap_br_8888(char *buf, const lv_area_t * area){
+    #if PROFILE
+    uint64_t begin = sceKernelGetSystemTimeWide();
+    #endif
+
+    int x2 = area->x2 > MY_DISP_HOR_RES - 1 ? MY_DISP_HOR_RES - 1 : area->x2;
+    for(int line = area->y1;line <= area->y2;line++){
+        for(int pixel = area->x1;pixel <= x2;pixel++){
+            uint8_t *p = (uint8_t *)&buf[(line * PSP_BUF_WIDTH + pixel) * 4];
+            uint8_t r = p[2];
+            uint8_t b = p[0];
+            p[2] = b;
+            p[0] = r;
+        }
+    }
+
+    #if PROFILE
+    uint32_t timespent = sceKernelGetSystemTimeWide() - begin;
+    printk("%s: %d %d %d %d took %u us\n", __func__, area->x1, area->x2, area->y1, area->y2, timespent);
+    #endif
+}
+
+static void swap_br_565(char *buf, const lv_area_t * area){
+    #if PROFILE
+    uint64_t begin = sceKernelGetSystemTimeWide();
+    #endif
+
+    int x2 = area->x2 > MY_DISP_HOR_RES - 1 ? MY_DISP_HOR_RES - 1 : area->x2;
+    for(int line = area->y1;line <= area->y2;line++){
+        for(int pixel = area->x1;pixel <= x2;pixel++){
+            uint8_t *p = (uint8_t *)&buf[(line * PSP_BUF_WIDTH + pixel) * 2];
+
+            uint8_t r = p[1] >> 3;
+            uint8_t g_0 = p[1] & 0b111;
+            uint8_t g_1 = p[0] & 0b11100000;
+            uint8_t b = p[0] & 0b11111;
+
+            p[1] = (b << 3) | g_0;
+            p[0] = (r) | g_1;
+        }
+    }
+
+    #if PROFILE
+    uint32_t timespent = sceKernelGetSystemTimeWide() - begin;
+    printk("%s: %d %d %d %d took %u us\n", __func__, area->x1, area->x2, area->y1, area->y2, timespent);
+    #endif
+}
+
+static void dma_copy_and_set_framebuf(char *dst, const char *src, int size, int psp_pixel_format){
+    #if PROFILE
+    uint64_t begin = sceKernelGetSystemTimeWide();
+    #endif
+
+    dcache_writeback((uint32_t)src, size);
+    sceDmacMemcpy(dst, src, size);
+    sceDisplaySetFrameBuf(dst, PSP_BUF_WIDTH, psp_pixel_format, PSP_DISPLAY_SETBUF_NEXTVSYNC);
+
+    #if PROFILE
+    uint32_t timespent = sceKernelGetSystemTimeWide() - begin;
+    printk("%s: took %u us\n", __func__, timespent);
+    #endif
+}
+
+/*Flush the content of the internal buffer the specific area on the display.
+ *`px_map` contains the rendered image as raw pixel map and it should be copied to `area` on the display.
+ *You can use DMA or any hardware acceleration to do this operation in the background but
+ *'lv_display_flush_ready()' has to be called when it's finished.*/
+static void disp_flush(lv_display_t * disp_drv, const lv_area_t * area, uint8_t * px_map)
+{
+    static int buffer_toggle = 0;
+    char *fb = buffer_toggle ? disp_buf_1 : disp_buf_0;
+    buffer_toggle = !buffer_toggle;
+
+    #if LV_COLOR_DEPTH == 16
+    int psp_pixel_format = PSP_DISPLAY_PIXEL_FORMAT_565;
+    swap_br_565(draw_buf, area);
+    #endif
+
+    #if LV_COLOR_DEPTH == 32
+    int psp_pixel_format = PSP_DISPLAY_PIXEL_FORMAT_8888;
+    swap_br_8888(draw_buf, area);
+    #endif
+
+    dma_copy_and_set_framebuf(fb, draw_buf, sizeof(draw_buf), psp_pixel_format);
+
     sceDisplayWaitVblankCB();
-    disp_buf = draw_buf;
-    draw_buf = vabsptr(sceGuSwapBuffers());
+
     /*IMPORTANT!!!
      *Inform the graphics library that you are ready with the flushing*/
-    lv_disp_flush_ready(disp_drv);
+    lv_display_flush_ready(disp_drv);
 }
 
-/*OPTIONAL: GPU INTERFACE*/
-
-/*If your MCU has hardware accelerator (GPU) then you can use it to fill a memory with a color*/
-//static void gpu_fill(lv_disp_drv_t * disp_drv, lv_color_t * dest_buf, lv_coord_t dest_width,
-//                    const lv_area_t * fill_area, lv_color_t color)
-//{
-//    /*It's an example code which should be done by your GPU*/
-//    int32_t x, y;
-//    dest_buf += dest_width * fill_area->y1; /*Go to the first line*/
-//
-//    for(y = fill_area->y1; y <= fill_area->y2; y++) {
-//        for(x = fill_area->x1; x <= fill_area->x2; x++) {
-//            dest_buf[x] = color;
-//        }
-//        dest_buf+=dest_width;    /*Go to the next line*/
-//    }
-//}
-
+#else /*Enable this file at the top*/
 
 /*This dummy typedef exists purely to silence -Wpedantic.*/
 typedef int keep_pedantic_happy;
+#endif
