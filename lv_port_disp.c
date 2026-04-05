@@ -51,7 +51,6 @@ static void disp_flush(lv_display_t * disp, const lv_area_t * area, uint8_t * px
 static char *disp_buf_0;
 static char *disp_buf_1;
 static char draw_buf[FBSIZE];
-static char draw_buf_br_flip[FBSIZE];
 
 /**********************
  *      MACROS
@@ -127,51 +126,51 @@ static void dcache_writeback(uint32_t addr, int size){
 }
 
 // on no, this is gonna be very slow
-static void swap_br_8888(char *dst, const char *src){
+static void swap_br_8888(char *buf, const lv_area_t * area){
     #if PROFILE
     uint64_t begin = sceKernelGetSystemTimeWide();
     #endif
 
-    for(int line = 0;line < MY_DISP_VER_RES;line++){
-        for(int pixel = 0;pixel < MY_DISP_HOR_RES;pixel++){
-            char *dst_pixel = &dst[(line * PSP_BUF_WIDTH + pixel) * 4];
-            char *src_pixel = &src[(line * PSP_BUF_WIDTH + pixel) * 4];
-            dst_pixel[3] = src_pixel[3];
-            dst_pixel[2] = src_pixel[0];
-            dst_pixel[1] = src_pixel[1];
-            dst_pixel[0] = src_pixel[2];
+    int x2 = area->x2 > MY_DISP_HOR_RES - 1 ? MY_DISP_HOR_RES - 1 : area->x2;
+    for(int line = area->y1;line <= area->y2;line++){
+        for(int pixel = area->x1;pixel <= x2;pixel++){
+            uint8_t *p = (uint8_t *)&buf[(line * PSP_BUF_WIDTH + pixel) * 4];
+            uint8_t r = p[2];
+            uint8_t b = p[0];
+            p[2] = b;
+            p[0] = r;
         }
     }
 
     #if PROFILE
     uint32_t timespent = sceKernelGetSystemTimeWide() - begin;
-    printk("%s: took %u us\n", __func__, timespent);
+    printk("%s: %d %d %d %d took %u us\n", __func__, area->x1, area->x2, area->y1, area->y2, timespent);
     #endif
 }
 
-static void swap_br_565(char *dst, const char *src){
+static void swap_br_565(char *buf, const lv_area_t * area){
     #if PROFILE
     uint64_t begin = sceKernelGetSystemTimeWide();
     #endif
 
-    for(int line = 0;line < MY_DISP_VER_RES;line++){
-        for(int pixel = 0;pixel < MY_DISP_HOR_RES;pixel++){
-            uint8_t *dst_pixel = (uint8_t *)&dst[(line * PSP_BUF_WIDTH + pixel) * 2];
-            uint8_t *src_pixel = (uint8_t *)&src[(line * PSP_BUF_WIDTH + pixel) * 2];
+    int x2 = area->x2 > MY_DISP_HOR_RES - 1 ? MY_DISP_HOR_RES - 1 : area->x2;
+    for(int line = area->y1;line <= area->y2;line++){
+        for(int pixel = area->x1;pixel <= x2;pixel++){
+            uint8_t *p = (uint8_t *)&buf[(line * PSP_BUF_WIDTH + pixel) * 2];
 
-            uint8_t r = src_pixel[1] >> 3;
-            uint8_t g_0 = src_pixel[1] & 0b111;
-            uint8_t g_1 = src_pixel[0] & 0b11100000;
-            uint8_t b = src_pixel[0] & 0b11111;
+            uint8_t r = p[1] >> 3;
+            uint8_t g_0 = p[1] & 0b111;
+            uint8_t g_1 = p[0] & 0b11100000;
+            uint8_t b = p[0] & 0b11111;
 
-            dst_pixel[1] = (b << 3) | g_0;
-            dst_pixel[0] = (r) | g_1;
+            p[1] = (b << 3) | g_0;
+            p[0] = (r) | g_1;
         }
     }
 
     #if PROFILE
     uint32_t timespent = sceKernelGetSystemTimeWide() - begin;
-    printk("%s: took %u us\n", __func__, timespent);
+    printk("%s: %d %d %d %d took %u us\n", __func__, area->x1, area->x2, area->y1, area->y2, timespent);
     #endif
 }
 
@@ -202,15 +201,15 @@ static void disp_flush(lv_display_t * disp_drv, const lv_area_t * area, uint8_t 
 
     #if LV_COLOR_DEPTH == 16
     int psp_pixel_format = PSP_DISPLAY_PIXEL_FORMAT_565;
-    swap_br_565(draw_buf_br_flip, draw_buf);
+    swap_br_565(draw_buf, area);
     #endif
 
     #if LV_COLOR_DEPTH == 32
     int psp_pixel_format = PSP_DISPLAY_PIXEL_FORMAT_8888;
-    swap_br_8888(draw_buf_br_flip, draw_buf);
+    swap_br_8888(draw_buf, area);
     #endif
 
-    dma_copy_and_set_framebuf(fb, draw_buf_br_flip, sizeof(draw_buf_br_flip), psp_pixel_format);
+    dma_copy_and_set_framebuf(fb, draw_buf, sizeof(draw_buf), psp_pixel_format);
 
     sceDisplayWaitVblankCB();
 
